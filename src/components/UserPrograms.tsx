@@ -1,4 +1,5 @@
 import Link from "next/link";
+import Image from "next/image";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -85,9 +86,11 @@ const UserPrograms = () => {
               <CardHeader className="pt-6 px-5">
                 <div className="flex items-center gap-4 mb-4">
                   <div className="h-16 w-16 rounded-full overflow-hidden border border-border">
-                    <img
+                    <Image
                       src={program.profilePic}
                       alt={`${program.first_name}`}
+                      width={64}
+                      height={64}
                       className="h-full w-full object-cover"
                     />
                   </div>

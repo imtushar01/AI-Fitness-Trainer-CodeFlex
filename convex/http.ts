@@ -71,42 +71,179 @@ http.route({
   }),
 });
 
-function validateWorkoutPlan(plan: any) {
-  const validatedPlan = {
-    schedule: plan.schedule,
-    exercises: plan.exercises.map((exercise: any) => ({
-      day: exercise.day,
-      routines: exercise.routines.map((routine: any) => ({
-        name: routine.name,
-        sets: typeof routine.sets === "number" ? routine.sets : parseInt(routine.sets) || 1,
-        reps: typeof routine.reps === "number" ? routine.reps : parseInt(routine.reps) || 10,
-      })),
-    })),
+function extractVapiPayload(payload: any) {
+  let args: any = {};
+  let toolCallId: string | undefined = undefined;
+
+  // 1. Vapi tool-calls structure (message.toolCalls)
+  if (payload?.message?.toolCalls?.[0]?.function) {
+    const fn = payload.message.toolCalls[0].function;
+    toolCallId = payload.message.toolCalls[0].id;
+    const rawArgs = fn.arguments;
+    if (typeof rawArgs === "string") {
+      try {
+        args = JSON.parse(rawArgs);
+      } catch (e) {
+        console.error("Failed to parse toolCalls arguments JSON string:", e);
+      }
+    } else if (typeof rawArgs === "object" && rawArgs !== null) {
+      args = rawArgs;
+    }
+  }
+  // 2. Vapi functionCall structure (message.functionCall)
+  else if (payload?.message?.functionCall) {
+    const fn = payload.message.functionCall;
+    const rawArgs = fn.parameters || fn.arguments;
+    if (typeof rawArgs === "string") {
+      try {
+        args = JSON.parse(rawArgs);
+      } catch (e) {
+        console.error("Failed to parse functionCall arguments JSON string:", e);
+      }
+    } else if (typeof rawArgs === "object" && rawArgs !== null) {
+      args = rawArgs;
+    }
+  }
+  // 3. Vapi toolCall structure (toolCall.function)
+  else if (payload?.toolCall?.function) {
+    const fn = payload.toolCall.function;
+    toolCallId = payload.toolCall.id;
+    const rawArgs = fn.arguments;
+    if (typeof rawArgs === "string") {
+      try {
+        args = JSON.parse(rawArgs);
+      } catch (e) {}
+    } else if (typeof rawArgs === "object" && rawArgs !== null) {
+      args = rawArgs;
+    }
+  }
+  // 4. Direct flat structure
+  else {
+    args = payload || {};
+  }
+
+  // Extract user_id with fallbacks to Vapi call variableValues
+  const userId =
+    args.user_id ||
+    args.userId ||
+    payload?.message?.call?.variableValues?.user_id ||
+    payload?.call?.variableValues?.user_id ||
+    payload?.variableValues?.user_id;
+
+  return {
+    toolCallId,
+    user_id: userId,
+    age: args.age || args.Age || "25",
+    height: args.height || args.Height || "170 cm",
+    weight: args.weight || args.Weight || "70 kg",
+    injuries: args.injuries || args.Injuries || "None",
+    workout_days: args.workout_days || args.workoutDays || args.days || "3",
+    fitness_goal: args.fitness_goal || args.fitnessGoal || args.goal || "General Fitness",
+    fitness_level: args.fitness_level || args.fitnessLevel || args.level || "Beginner",
+    dietary_restrictions: args.dietary_restrictions || args.dietaryRestrictions || args.diet || "None",
   };
-  return validatedPlan;
+}
+
+function parseGeminiJson(text: string) {
+  const cleaned = text
+    .replace(/```(?:json)?/gi, "")
+    .replace(/```/g, "")
+    .trim();
+  return JSON.parse(cleaned);
+}
+
+function validateWorkoutPlan(plan: any) {
+  if (!plan || typeof plan !== "object") {
+    plan = {};
+  }
+
+  const schedule = Array.isArray(plan.schedule)
+    ? plan.schedule.map(String)
+    : ["Monday", "Wednesday", "Friday"];
+
+  const rawExercises = Array.isArray(plan.exercises) ? plan.exercises : [];
+  const exercises = rawExercises.map((exercise: any) => ({
+    day: String(exercise.day || "Day 1"),
+    routines: (Array.isArray(exercise.routines) ? exercise.routines : []).map((routine: any) => {
+      const rawSets =
+        typeof routine.sets === "number" && !isNaN(routine.sets)
+          ? routine.sets
+          : parseInt(routine.sets);
+      const sets = !isNaN(rawSets) && rawSets > 0 ? rawSets : 3;
+
+      const rawReps =
+        typeof routine.reps === "number" && !isNaN(routine.reps)
+          ? routine.reps
+          : parseInt(routine.reps);
+      const reps = !isNaN(rawReps) && rawReps > 0 ? rawReps : 10;
+
+      return {
+        name: String(routine.name || "Exercise"),
+        sets,
+        reps,
+      };
+    }),
+  }));
+
+  return { schedule, exercises };
 }
 
 // validate diet plan to ensure it strictly follows schema
 function validateDietPlan(plan: any) {
-  // only keep the fields we want
-  const validatedPlan = {
-    dailyCalories: plan.dailyCalories,
-    meals: plan.meals.map((meal: any) => ({
-      name: meal.name,
-      foods: meal.foods,
-    })),
-  };
-  return validatedPlan;
+  if (!plan || typeof plan !== "object") {
+    plan = {};
+  }
+
+  let dailyCalories = 2000;
+  if (typeof plan.dailyCalories === "number" && !isNaN(plan.dailyCalories)) {
+    dailyCalories = plan.dailyCalories;
+  } else if (plan.dailyCalories) {
+    const parsed = parseInt(String(plan.dailyCalories).replace(/[^0-9]/g, ""));
+    if (!isNaN(parsed) && parsed > 0) {
+      dailyCalories = parsed;
+    }
+  }
+
+  const rawMeals = Array.isArray(plan.meals) ? plan.meals : [];
+  const meals = rawMeals.map((meal: any) => ({
+    name: String(meal.name || "Meal"),
+    foods: Array.isArray(meal.foods)
+      ? meal.foods.map(String)
+      : typeof meal.foods === "string"
+      ? [meal.foods]
+      : ["Healthy food option"],
+  }));
+
+  return { dailyCalories, meals };
 }
+
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type, Authorization",
+};
+
+http.route({
+  path: "/vapi/generate-program",
+  method: "OPTIONS",
+  handler: httpAction(async () => {
+    return new Response(null, {
+      status: 204,
+      headers: corsHeaders,
+    });
+  }),
+});
 
 http.route({
   path: "/vapi/generate-program",
   method: "POST",
   handler: httpAction(async (ctx, request) => {
     try {
-      const payload = await request.json();
+      const rawPayload = await request.json();
+      console.log("Raw payload received from Vapi:", JSON.stringify(rawPayload));
 
       const {
+        toolCallId,
         user_id,
         age,
         height,
@@ -116,12 +253,32 @@ http.route({
         fitness_goal,
         fitness_level,
         dietary_restrictions,
-      } = payload;
+      } = extractVapiPayload(rawPayload);
 
-      console.log("Payload is here:", payload);
+      console.log("Extracted params:", {
+        user_id,
+        age,
+        height,
+        weight,
+        injuries,
+        workout_days,
+        fitness_goal,
+        fitness_level,
+        dietary_restrictions,
+      });
+
+      let activeUserId = user_id;
+      if (!activeUserId) {
+        const latestUser = await ctx.runMutation(api.users.getLatestUser, {});
+        if (latestUser?.clerkId) {
+          activeUserId = latestUser.clerkId;
+        } else {
+          activeUserId = "default_user";
+        }
+      }
 
       const model = genAI.getGenerativeModel({
-        model: "gemini-2.0-flash-001",
+        model: "gemini-3.6-flash",
         generationConfig: {
           temperature: 0.4, // lower temperature for more predictable outputs
           topP: 0.9,
@@ -172,13 +329,6 @@ http.route({
       
       DO NOT add any fields that are not in this example. Your response must be a valid JSON object with no additional text.`;
 
-      const workoutResult = await model.generateContent(workoutPrompt);
-      const workoutPlanText = workoutResult.response.text();
-
-      // VALIDATE THE INPUT COMING FROM AI
-      let workoutPlan = JSON.parse(workoutPlanText);
-      workoutPlan = validateWorkoutPlan(workoutPlan);
-
       const dietPrompt = `You are an experienced nutrition coach creating a personalized diet plan based on:
         Age: ${age}
         Height: ${height}
@@ -216,36 +366,51 @@ http.route({
         
         DO NOT add any fields that are not in this example. Your response must be a valid JSON object with no additional text.`;
 
-      const dietResult = await model.generateContent(dietPrompt);
-      const dietPlanText = dietResult.response.text();
+      // Run both Gemini generation calls in parallel for fast response times (< 5s)
+      const [workoutResult, dietResult] = await Promise.all([
+        model.generateContent(workoutPrompt),
+        model.generateContent(dietPrompt),
+      ]);
 
-      // VALIDATE THE INPUT COMING FROM AI
-      let dietPlan = JSON.parse(dietPlanText);
+      const workoutPlanText = workoutResult.response.text();
+      let workoutPlan = parseGeminiJson(workoutPlanText);
+      workoutPlan = validateWorkoutPlan(workoutPlan);
+
+      const dietPlanText = dietResult.response.text();
+      let dietPlan = parseGeminiJson(dietPlanText);
       dietPlan = validateDietPlan(dietPlan);
 
       // save to our DB: CONVEX
       const planId = await ctx.runMutation(api.plans.createPlan, {
-        userId: user_id,
+        userId: activeUserId,
         dietPlan,
         isActive: true,
         workoutPlan,
         name: `${fitness_goal} Plan - ${new Date().toLocaleDateString()}`,
       });
 
-      return new Response(
-        JSON.stringify({
-          success: true,
-          data: {
-            planId,
-            workoutPlan,
-            dietPlan,
+      const responseBody: any = {
+        success: true,
+        data: {
+          planId,
+          workoutPlan,
+          dietPlan,
+        },
+      };
+
+      if (toolCallId) {
+        responseBody.results = [
+          {
+            toolCallId,
+            result: "Workout and diet plan generated successfully!",
           },
-        }),
-        {
-          status: 200,
-          headers: { "Content-Type": "application/json" },
-        }
-      );
+        ];
+      }
+
+      return new Response(JSON.stringify(responseBody), {
+        status: 200,
+        headers: { "Content-Type": "application/json", ...corsHeaders },
+      });
     } catch (error) {
       console.error("Error generating fitness plan:", error);
       return new Response(
@@ -255,7 +420,7 @@ http.route({
         }),
         {
           status: 500,
-          headers: { "Content-Type": "application/json" },
+          headers: { "Content-Type": "application/json", ...corsHeaders },
         }
       );
     }

@@ -21,7 +21,7 @@ const ProfilePage = () => {
   const { user } = useUser();
   const userId = user?.id as string;
 
-  const allPlans = useQuery(api.plans.getUserPlans, { userId });
+  const allPlans = useQuery(api.plans.getUserPlans, userId ? { userId } : "skip");
   const [selectedPlanId, setSelectedPlanId] = useState<null | string>(null);
 
   const activePlan = allPlans?.find((plan) => plan.isActive);
@@ -164,38 +164,54 @@ const ProfilePage = () => {
                 </TabsContent>
 
                 <TabsContent value="diet">
-                  <div className="space-y-4">
-                    <div className="flex justify-between items-center mb-4">
-                      <span className="font-mono text-sm text-muted-foreground">
-                        DAILY CALORIE TARGET
-                      </span>
-                      <div className="font-mono text-xl text-primary">
-                        {currentPlan.dietPlan.dailyCalories} KCAL
+                  <div className="space-y-6">
+                    {/* Calorie & Nutrition Banner */}
+                    <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center p-4 bg-primary/10 border border-primary/30 rounded-lg gap-4">
+                      <div>
+                        <div className="text-xs font-mono text-primary uppercase tracking-wider">
+                          Daily Nutrition Target
+                        </div>
+                        <h4 className="text-lg font-bold text-foreground mt-0.5">
+                          Personalized Caloric Distribution
+                        </h4>
+                      </div>
+                      <div className="flex items-baseline gap-1 bg-background/80 px-4 py-2 rounded-md border border-primary/20">
+                        <span className="font-mono text-2xl font-bold text-primary">
+                          {currentPlan.dietPlan.dailyCalories}
+                        </span>
+                        <span className="font-mono text-xs text-muted-foreground uppercase">KCAL / DAY</span>
                       </div>
                     </div>
 
-                    <div className="h-px w-full bg-border my-4"></div>
-
-                    <div className="space-y-4">
+                    {/* Meal Table & Cards */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                       {currentPlan.dietPlan.meals.map((meal, index) => (
                         <div
                           key={index}
-                          className="border border-border rounded-lg overflow-hidden p-4"
+                          className="border border-border hover:border-primary/40 rounded-lg overflow-hidden p-4 bg-card/60 transition-colors"
                         >
-                          <div className="flex items-center gap-2 mb-3">
-                            <div className="w-2 h-2 rounded-full bg-primary"></div>
-                            <h4 className="font-mono text-primary">{meal.name}</h4>
+                          <div className="flex items-center justify-between mb-3 border-b border-border/60 pb-2">
+                            <div className="flex items-center gap-2">
+                              <div className="w-2.5 h-2.5 rounded-full bg-primary animate-pulse"></div>
+                              <h4 className="font-mono font-bold text-primary tracking-wide">
+                                {meal.name}
+                              </h4>
+                            </div>
+                            <span className="text-xs font-mono text-muted-foreground bg-secondary/10 px-2 py-0.5 rounded border border-secondary/20">
+                              MEAL {index + 1}
+                            </span>
                           </div>
-                          <ul className="space-y-2">
+
+                          <ul className="space-y-2.5">
                             {meal.foods.map((food, foodIndex) => (
                               <li
                                 key={foodIndex}
-                                className="flex items-center gap-2 text-sm text-muted-foreground"
+                                className="flex items-start gap-2.5 text-sm text-foreground/90 bg-background/40 p-2 rounded border border-border/40"
                               >
-                                <span className="text-xs text-primary font-mono">
+                                <span className="text-xs text-primary font-mono bg-primary/10 px-1.5 py-0.5 rounded mt-0.5">
                                   {String(foodIndex + 1).padStart(2, "0")}
                                 </span>
-                                {food}
+                                <span className="flex-1 font-medium">{food}</span>
                               </li>
                             ))}
                           </ul>
